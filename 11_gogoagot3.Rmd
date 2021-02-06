@@ -1,0 +1,630 @@
+---
+title: "---* Go Goa Got ---*"
+runtime: shiny
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    #source_code : embed
+    # includes: 
+    #   after_header: "busy.html"
+    vertical_layout: fill
+    logo: www/haehaemhat2.png
+    #css: CSSBackgrounds.css
+    theme : cerulean
+    #theme : united
+    #theme : cosmo
+    #favicon: www/haehaemhat.PNG
+    
+    
+always_allow_html : yes
+
+---
+
+```{r setup, include=FALSE}
+options(encoding = "cp949")
+
+
+
+## libralies
+library(shiny)
+library(shinycssloaders)
+library(flexdashboard)
+library(DT)
+library(dplyr)
+library(highcharter)
+library(lubridate)
+library(stringr)
+library(padr)
+library(readxl)
+library(tidyr)
+
+
+## function
+
+
+cafe_write_func = function(data, start_date, end_date) {
+  
+  # cafeWritten = readxl::read_excel("D:/workspace/python_workspace/01_cafeCrawler/naverCafeWrite_A.xlsx")
+  
+  data$date[str_length(data$date) == 5] = paste0(gsub("-",".",end_date),".")
+  data$date = ymd(data$date)
+  
+  data$writer = gsub("'","",data$writer)
+  data$writer = gsub("\\[","",data$writer)
+  data$writer = gsub("\\]","",data$writer)
+  
+  # data$writer = gsub("<\\['\\]>","",data$writer)
+  
+  
+  tid = data %>% group_by(writer,date) %>% summarise(n = n()) %>% 
+    filter(date >= start_date) %>% as.data.frame()
+  
+  #tid = as.data.frame(tid)
+  
+  
+  
+  
+  for(i in 1:length(writers)) {
+    if(tid %>% filter(writer == writers[i], date == start_date) %>% nrow() != 1) {
+      tid = rbind(tid, data.frame(writer = writers[i], 
+                                  date = start_date,
+                                  n = NA))
+      
+    }
+    
+    if(tid %>% filter(writer == writers[i], date == end_date) %>% nrow() != 1) {
+      tid = rbind(tid, data.frame(writer = writers[i], 
+                                  date = end_date,
+                                  n = NA))
+      
+    }
+    
+    
+  }
+  tid = tid %>% arrange(writer, date)
+  tid[is.na(tid)] = 0
+  
+  
+  tid2 = tid %>%
+    pad(group = 'writer', interval = 'day') %>%   # Explicitly fill by 1 min
+    fill_by_value(n)
+  
+  
+  tid3 = tid2 %>% transform(logical_write = ifelse(n > 0, 1, 0))
+  colnames(tid3)[3] = "n_write"
+  
+  return(tid3)
+  
+}
+cafe_viwer_func = function(data, start_date, end_date) {
+  
+  data$date[str_length(data$date) == 5] = paste0(gsub("-",".",end_date),".")
+  data$date = ymd(data$date)
+  
+  data$writer = gsub("'","",data$writer)
+  data$writer = gsub("\\[","",data$writer)
+  data$writer = gsub("\\]","",data$writer)
+  # data$writer = gsub("\\[.*?\\]","",data$writer)
+  
+  data$viewCount = gsub(",", "", data$viewCount)
+  data$viewCount = as.integer(data$viewCount)
+
+  tid = data %>% group_by(writer) %>% summarise(ViewCount_total = sum(viewCount)) %>%
+    arrange(desc(ViewCount_total)) %>% as.data.frame()
+
+  return(tid)
+  
+}
+cafe_reply_func = function(data, start_date, end_date) { 
+  
+  # cafeRepl = readxl::read_excel("D:/workspace/python_workspace/01_cafeCrawler/naverCafeReply_A.xlsx")
+  
+  data$date[str_length(data$date) == 5] = paste0(gsub("-",".",end_date),".")
+  data$date = ymd(data$date)
+
+  
+  data$writer = gsub("'","",data$writer)
+  data$writer = gsub("\\[","",data$writer)
+  data$writer = gsub("\\]","",data$writer)
+  
+  #data$writer = gsub("<\\['\\]>","",data$writer)
+  
+  
+  tid_Repl = data %>% group_by(writer,date) %>% summarise(n = n()) %>% 
+    filter(date >= start_date) %>% as.data.frame()
+
+  
+  
+  
+  
+  for(i in 1:length(writers)) {
+    if(tid_Repl %>% filter(writer == writers[i], date == start_date) %>% nrow() != 1) {
+      tid_Repl = rbind(tid_Repl, data.frame(writer = writers[i], 
+                                            date = start_date,
+                                            n = NA))
+      
+    }
+    
+    if(tid_Repl %>% filter(writer == writers[i], date == end_date) %>% nrow() != 1) {
+      tid_Repl = rbind(tid_Repl, data.frame(writer = writers[i], 
+                                            date = end_date,
+                                            n = NA))
+      
+    }
+    
+    
+  }
+  tid_Repl = tid_Repl %>% arrange(writer, date)
+  tid_Repl[is.na(tid_Repl)] = 0
+  
+  
+  
+  tid_Repl2 = tid_Repl %>%
+    pad(group = 'writer', interval = 'day') %>%   # Explicitly fill by 1 min
+    fill_by_value(n)
+  
+  
+  
+  tid_Repl3 = tid_Repl2 %>% transform(logical_reply = ifelse(n >= 5, 1, 0))
+  colnames(tid_Repl3)[3] = "n_reply"
+  
+  
+  return(tid_Repl3)
+}
+
+
+
+#source("./src/04_naverCafeWrite.R", encoding = "UTF-8")
+#source("./src/05_naverCafeReply.R", encoding = "UTF-8")
+#source("./src/06_members.R", encoding = "UTF-8")
+
+
+
+
+### data load
+
+start_d = "2021-01-30"
+end_d = "2021-02-05"
+
+
+writers_df = read.csv("./data/members.csv", encoding = "cp949")
+writers = as.character(writers_df$habit_mate)
+
+cafeWritten = readxl::read_excel("./data//naverCafeWrite_A.xlsx")
+cafeRepl = readxl::read_excel("./data/naverCafeReply_A.xlsx")
+
+flag_tid = cafe_write_func(cafeWritten, start_d, end_d)
+
+```
+
+
+
+Action Check {data-icon="fa-list"}
+=====================================
+
+    Inputs {.sidebar}
+-----------------------------------------------------------------------
+
+### Specify date range
+
+```{r}
+
+selectInput("a","Start Date",choices = unique(flag_tid$date), selected = min(flag_tid$date))
+selectInput("b","End Date",choices = unique(flag_tid$date), selected = max(flag_tid$date))
+
+```
+
+
+Column {data-width=800}
+-----------------------------------------------------------------------
+
+### Data Extract
+
+```{r}
+
+
+start_day = reactive({
+  input$a
+})
+
+end_day = reactive({
+  input$b
+})
+
+
+renderDataTable({
+  
+tid3 = cafe_write_func(cafeWritten, start_day(), end_day())
+tid_Repl3 = cafe_reply_func(cafeRepl, start_day(), end_day())
+
+
+
+
+total = merge(tid3, tid_Repl3)
+
+
+total$n_write = NULL
+total$n_reply = NULL
+
+total_write = total[,-4]
+total_reply = total[,-3]
+
+total_write_t = spread(data = total_write, key = "date", value = "logical_write")
+total_reply_t = spread(data = total_reply, key = "date", value = "logical_reply")
+
+
+flag_df = data.frame(writer = writers)
+
+total_write_t = left_join(flag_df, total_write_t)
+total_reply_t = left_join(flag_df, total_reply_t)
+
+colnames(total_write_t)[2:ncol(total_write_t)] = paste0(colnames(total_write_t)[2:ncol(total_write_t)],"_write")
+colnames(total_reply_t)[2:ncol(total_reply_t)] = paste0(colnames(total_reply_t)[2:ncol(total_reply_t)],"_reply")
+
+
+all_frame = left_join(total_write_t, total_reply_t)
+
+
+
+ord_a = seq(2,ncol(total_write_t),1)
+ord_b = seq(ncol(all_frame) - ncol(total_reply_t) + 2, ncol(all_frame), 1)
+
+ord = c()
+for(i in 1:length(ord_a)) {
+  ord = c(ord, ord_a[i])
+  ord = c(ord, ord_b[i])
+}
+
+
+all_frame = all_frame[,c(1,ord)] 
+all_frame = left_join(flag_df, all_frame)
+
+
+
+all_frame = left_join(all_frame, writers_df, by = c("writer" = "habit_mate"))
+
+all_frame = all_frame[,c(1,ncol(all_frame),3:(ncol(all_frame) -1) )]
+
+datatable(all_frame, filter = 'top',extensions = c('Scroller', 'Buttons'), options = list(
+  deferRender = TRUE,
+  scrollY = 700,
+  scroller = TRUE,
+  dom = 'Bfrtip',
+  buttons = c('copy', 'excel')
+  
+))
+
+
+})
+
+```
+
+
+Power Writer {data-icon="fa-send"}
+=====================================
+
+
+    Inputs {.sidebar}
+-----------------------------------------------------------------------
+
+### Specify date range
+
+```{r}
+
+selectInput("c","Start Date",choices = unique(flag_tid$date), selected = min(flag_tid$date))
+selectInput("d","End Date",choices = unique(flag_tid$date), selected = max(flag_tid$date))
+
+```
+
+
+Column {data-width=700}
+-----------------------------------------------------------------------
+
+### Ranking Graph
+```{r}
+
+start_day_c = reactive({
+  input$c
+})
+
+end_day_d = reactive({
+  input$d
+})
+
+
+renderHighchart({
+
+pw_tid3 = cafe_write_func(cafeWritten, start_day_c(), end_day_d())
+pw_tid_Repl3 = cafe_reply_func(cafeRepl, start_day_c(), end_day_d())
+
+
+
+
+pw_total = merge(pw_tid3, pw_tid_Repl3)
+
+total_pw = pw_total %>% group_by(writer) %>% summarise(total_write = sum(n_write)) %>% arrange(desc(total_write))
+
+
+total_pw %>%
+  top_n(15) %>%
+  hchart('column',hcaes('writer','total_write')) %>%
+  hc_title(text = "total_write") %>%
+  hc_subtitle(text = "top 15 rank") %>%
+  hc_add_theme(hc_theme_538())
+
+
+# datatable(total_pw, filter = 'top',extensions = c('Scroller', 'Buttons'), options = list(
+#   deferRender = TRUE,
+#   scrollY = 700,
+#   scroller = TRUE,
+#   dom = 'Bfrtip',
+#   buttons = c('copy', 'excel')
+#
+# ))
+
+
+})
+```
+
+
+Column {data-width=300}
+-----------------------------------------------------------------------
+
+### Data Extract
+```{r}
+
+start_day_c = reactive({
+  input$c
+})
+
+end_day_d = reactive({
+  input$d
+})
+
+
+renderDataTable({
+
+pw_tid3 = cafe_write_func(cafeWritten, start_day_c(), end_day_d())
+pw_tid_Repl3 = cafe_reply_func(cafeRepl, start_day_c(), end_day_d())
+
+
+
+
+pw_total = merge(pw_tid3, pw_tid_Repl3)
+
+total_pw = pw_total %>% group_by(writer) %>% summarise(total_write = sum(n_write)) %>% arrange(desc(total_write))
+
+
+# total_pw %>%
+#   top_n(20) %>%
+#   hchart('column',hcaes('writer','total_write')) %>%
+#   hc_title(text = "total_write") %>%
+#   hc_subtitle(text = "Source: Leo") %>%
+#   hc_add_theme(hc_theme_538())
+#
+
+datatable(total_pw, filter = 'top',extensions = c('Scroller', 'Buttons'), options = list(
+  deferRender = TRUE,
+  scrollY = 700,
+  scroller = TRUE,
+  dom = 'Bfrtip',
+  buttons = c('copy', 'excel')
+
+))
+
+
+})
+```
+
+
+
+
+
+
+
+
+Best Replier {data-icon="fa-weixin"}
+=====================================
+
+
+
+
+    Inputs {.sidebar}
+-----------------------------------------------------------------------
+
+### Specify date range
+
+```{r}
+
+selectInput("e","Start Date",choices = unique(flag_tid$date), selected = min(flag_tid$date))
+selectInput("f","End Date",choices = unique(flag_tid$date), selected = max(flag_tid$date))
+
+```
+
+
+Column {data-width=700}
+-----------------------------------------------------------------------
+
+### Ranking Graph
+```{r}
+
+start_day_e = reactive({
+  input$e
+})
+
+end_day_f = reactive({
+  input$f
+})
+
+
+renderHighchart({
+
+bw_tid3 = cafe_write_func(cafeWritten, start_day_e(), end_day_f())
+bw_tid_Repl3 = cafe_reply_func(cafeRepl, start_day_e(), end_day_f())
+
+
+
+
+bw_total = merge(bw_tid3, bw_tid_Repl3)
+
+total_bw = bw_total %>% group_by(writer) %>% summarise(total_reply = sum(n_reply)) %>% arrange(desc(total_reply))
+
+
+total_bw %>%
+  top_n(15) %>%
+  hchart('column',hcaes('writer','total_reply')) %>%
+  hc_title(text = "total_reply") %>%
+  hc_subtitle(text = "top 15 rank") %>%
+  hc_add_theme(hc_theme_darkunica())
+
+# datatable(total_bw, filter = 'top',extensions = c('Scroller', 'Buttons'), options = list(
+#   deferRender = TRUE,
+#   scrollY = 700,
+#   scroller = TRUE,
+#   dom = 'Bfrtip',
+#   buttons = c('copy', 'excel')
+#
+# ))
+
+
+})
+```
+
+
+Column {data-width=300}
+-----------------------------------------------------------------------
+
+### Data Extract
+```{r}
+
+start_day_e = reactive({
+  input$e
+})
+
+end_day_f = reactive({
+  input$f
+})
+
+
+renderDataTable({
+
+bw_tid3 = cafe_write_func(cafeWritten, start_day_e(), end_day_f())
+bw_tid_Repl3 = cafe_reply_func(cafeRepl, start_day_e(), end_day_f())
+
+
+
+
+bw_total = merge(bw_tid3, bw_tid_Repl3)
+
+total_bw = bw_total %>% group_by(writer) %>% summarise(total_reply = sum(n_reply)) %>% arrange(desc(total_reply))
+
+datatable(total_bw, filter = 'top',extensions = c('Scroller', 'Buttons'), options = list(
+  deferRender = TRUE,
+  scrollY = 700,
+  scroller = TRUE,
+  dom = 'Bfrtip',
+  buttons = c('copy', 'excel')
+
+))
+
+
+})
+```
+
+
+
+Popular Poster {data-icon="fa-chevron-circle-up"}
+=====================================
+
+
+
+
+    Inputs {.sidebar}
+-----------------------------------------------------------------------
+
+### Specify date range
+
+```{r}
+
+selectInput("g","Start Date",choices = unique(flag_tid$date), selected = min(flag_tid$date))
+selectInput("h","End Date",choices = unique(flag_tid$date), selected = max(flag_tid$date))
+
+```
+
+
+Column {data-width=700}
+-----------------------------------------------------------------------
+
+### Ranking Graph
+```{r}
+
+start_day_g = reactive({
+  input$g
+})
+
+end_day_h = reactive({
+  input$h
+})
+
+
+renderHighchart({
+
+pp_tid3 = cafe_viwer_func(cafeWritten, start_day_g(), end_day_h())
+
+
+
+pp_tid3 %>%
+  top_n(15) %>%
+  hchart('column',hcaes('writer','ViewCount_total')) %>%
+  hc_title(text = "ViewCount_total") %>%
+  hc_subtitle(text = "top 15 rank") %>%
+  hc_add_theme(hc_theme_chalk())
+
+# datatable(pp_tid3, filter = 'top',extensions = c('Scroller', 'Buttons'), options = list(
+#   deferRender = TRUE,
+#   scrollY = 700,
+#   scroller = TRUE,
+#   dom = 'Bfrtip',
+#   buttons = c('copy', 'excel')
+#
+# ))
+
+
+})
+```
+
+
+
+Column {data-width=300}
+-----------------------------------------------------------------------
+
+### Data Extract
+```{r}
+
+start_day_g = reactive({
+  input$g
+})
+
+end_day_h = reactive({
+  input$h
+})
+
+
+renderDataTable({
+
+pp_tid3 = cafe_viwer_func(cafeWritten, start_day_g(), end_day_h())
+
+
+datatable(pp_tid3, filter = 'top',extensions = c('Scroller', 'Buttons'), options = list(
+  deferRender = TRUE,
+  scrollY = 700,
+  scroller = TRUE,
+  dom = 'Bfrtip',
+  buttons = c('copy', 'excel')
+
+))
+
+
+})
+```
+
